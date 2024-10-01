@@ -1,0 +1,7 @@
+Camera Intrinsics:
+Focal Length (mm): 1.8799999952316284
+Sensor Width (mm): 3.680000066757202
+
+Camera Extrinsics:
+Location (x, y, z) (cm): <Vector (1.7452, 0.0000, 99.9848)>
+Rotation Euler (x, y, z): <Euler (x=0.0175, y=-0.0000, z=1.5708), order='XYZ'>

@@ -1,0 +1,66 @@
+Bin:
+Min Scaling: 0.75
+Max Scaling: 1.25
+Rotation: True
+
+Objects:
+Min Objects: 1
+Max Objects: 10
+Scaling: True
+Min Scaling: 1.0
+Max Scaling: 1.0
+
+Lighting:
+Max Sources: 3
+Max Strenght: 100.0
+Random Colors: True
+
+Camera:
+Max Angle: 0
+Min Height: 1.0
+Max Height: 1.0
+
+Resolution x: 1280
+Resolution y: 720
+Focal Length: 1.8799999952316284
+Sensor Width: 3.680000066757202
+Sensor Height: 2.759999990463257
+Stereo Image: True
+
+Output:
+RGB: True
+Depth Map: True
+Normal Vectors: True
+Segmentation: True
+GQ: True
+Dataset Size: 1
+
+Stereo:
+Baseline: 9.5
+IR Matrix: True
+Matrix size: 10
+Dot separation (Degrees): 7
+
+Grasp Quality:
+Distance to Center of Mass: True
+Distance to Center of Mass Weight: 0.800000011920929
+Height: True
+Height Weight: 0.800000011920929
+Flatness: True
+Flatness Weight: 0.800000011920929
+Flatness Exponent: 8
+Smoothness: True
+Smoothness Weight: 0.800000011920929
+Smoothness Exponent: 8
+Ray Tracing: True
+Ray Tracing Mask Mask: False
+Ray Tracing Weight: 0.800000011920929
+Edge Detection: True
+Edge Mask: False
+Edge Detection Weight: 0.800000011920929
+Suction Cup Diameter: 50.0
+Edge Angle: 20
+
+Segmentation:
+Segmentation Type: INSTANCE
+Bounding Boxes: True

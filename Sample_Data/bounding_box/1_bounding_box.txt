@@ -1,0 +1,6 @@
+ObjectID,ObjectName,MinX,MinY,MaxX,MaxY
+1,Bin,198,0,1075,719
+3,Glassbowl_25k,321,229,970,719
+4,Amicelli_25k,358,0,605,367
+6,HotPot_25k,733,87,913,404
+7,SoftCakeOrange_25k,542,0,879,394
