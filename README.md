@@ -39,7 +39,7 @@ Install as a Blender Add-on:
 4. Enable the add-on by checking the box next to its name.
 
 
-### Usage Instructions:
+## Usage Instructions:
 
 Once you have installed and enabled the add-on, follow these steps to generate the Grasp Quality (GQ) dataset:
 
