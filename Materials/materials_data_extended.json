@@ -1,0 +1,80 @@
+[
+    {
+        "name": "1970_tiles",
+        "base_color": [
+            0.800000011920929,
+            0.800000011920929,
+            0.800000011920929
+        ],
+        "roughness": 0.5,
+        "metallic": 0.0,
+        "sheen_tint": null,
+        "anisotropic": 0.0,
+        "normal_map": null
+    },
+    {
+        "name": "Car Paint",
+        "base_color": [
+            0.800000011920929,
+            0.800000011920929,
+            0.800000011920929
+        ],
+        "roughness": 0.5,
+        "metallic": 1.0,
+        "sheen_tint": null,
+        "anisotropic": 0.0,
+        "normal_map": null
+    },
+    {
+        "name": "Composite Rubber",
+        "base_color": [
+            0.0,
+            0.0,
+            0.0
+        ],
+        "roughness": 0.0,
+        "metallic": 0.0,
+        "sheen_tint": null,
+        "anisotropic": 0.0,
+        "normal_map": null
+    },
+    {
+        "name": "Crushed Velvet Eevee",
+        "base_color": [
+            0.39361461997032166,
+            0.011983076110482216,
+            0.004000000189989805
+        ],
+        "roughness": 1.0,
+        "metallic": 0.0,
+        "sheen_tint": null,
+        "anisotropic": 0.0,
+        "normal_map": null
+    },
+    {
+        "name": "Glow Glass",
+        "base_color": [
+            0.8623401522636414,
+            0.8623401522636414,
+            0.8623401522636414
+        ],
+        "roughness": 0.0,
+        "metallic": 1.0,
+        "sheen_tint": null,
+        "anisotropic": 0.0,
+        "normal_map": null
+    },
+    {
+        "name": "wood boards",
+        "base_color": [
+            0.800000011920929,
+            0.800000011920929,
+            0.800000011920929
+        ],
+        "roughness": 0.27523812651634216,
+        "metallic": 0.0,
+        "sheen_tint": null,
+        "anisotropic": 0.0,
+        "normal_map": null
+    }
+]
