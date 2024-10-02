@@ -9,38 +9,33 @@ bl_info = {
 
 import bpy
 import os
-os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
-import pandas as pd
-import glob
-import random
+import sys
+import subprocess
+import json
+import random  # Ensure random is imported
+import pandas as pd  # Explicit import for pandas
+from pathlib import Path  # Ensure Path is imported
+from datetime import datetime  # Explicit import for datetime
 import math
+import bmesh
+import numpy as np
 import mathutils
+import glob
 import re
 import shutil
-import matplotlib.image as mpimg 
-import datetime
-import numpy as np
+import matplotlib.image as mpimg
 import cv2
-import OpenEXR as exr
+import OpenEXR
 import Imath
 from PIL import Image
 from matplotlib import pyplot as plt
-from mathutils import Vector, Matrix
-import OpenEXR
 from scipy.spatial import cKDTree
 from scipy.spatial.distance import cdist
 from sklearn.linear_model import LinearRegression
 import imageio
-import bmesh
-from numpy.linalg import norm
-from math import acos, degrees
-from scipy.ndimage import binary_dilation, convolve
 from skimage.morphology import disk
-from pathlib import Path
+from scipy.ndimage import binary_dilation, convolve
 import csv
-from datetime import datetime
-
-
 
 
 
@@ -75,10 +70,12 @@ class MODEL_PT_Panel(bpy.types.Panel):
         
         # Display the current object_quality directory path
         layout.prop(context.scene, "object_quality_directory", text="Objects Directory")
-    
         
         # Display the current bin_quality directory path
         layout.prop(context.scene, "bin_quality_directory", text="Bin Directory")
+        
+        # Display the current bin_quality directory path
+        layout.prop(context.scene, "materials_directory", text="Material JSON")
 
 
 #Scene paremeter settings
@@ -169,6 +166,7 @@ class OUTPUT_PT_Panel(bpy.types.Panel):
         layout = self.layout
         
         box = layout.box()
+        box.label(text="Rendering", icon='RENDERLAYERS')
         row = box.row()
         col1 = row.column(align=True)
         col2 = row.column(align=True)
@@ -182,11 +180,21 @@ class OUTPUT_PT_Panel(bpy.types.Panel):
         # Directly check the conditions in the draw method
         if context.scene.rgb and context.scene.depth and context.scene.normals and context.scene.segmentation:
             col2.prop(context.scene, "gq", text="Grasp Quality Map")
-        
-        box.prop(context.scene, "output_directory", text="Output Directory")
-        box.prop(context.scene, "dataset_size", text="Dataset size")
-        box.prop(context.scene, "starting_scene", text="Starting Scene Number")
 
+
+        box2 = layout.box()
+        box2.label(text="Extras", icon='EXPERIMENTAL')
+        if context.scene.gq:
+            box2.prop(context.scene, "gq_elements", text="GQ Elements")
+        box2.prop(context.scene, "positions", text="Positions")
+        
+        box3 = layout.box()
+        box3.label(text="Output", icon='DOWNARROW_HLT')
+        box3.prop(context.scene, "output_directory", text="Output Directory")
+        box3.prop(context.scene, "dataset_size", text="Dataset size")
+        box3.prop(context.scene, "starting_scene", text="Starting Scene Number")
+        
+        
 
 
 #Stereo Settings
@@ -391,23 +399,33 @@ def segmentation_modes_callback(scene, context):
 
 class FolderFinder(bpy.types.Operator):
     bl_idname = "select.folder"
-    bl_label = "Select Folder"
-    
+    bl_label = "Select Folder/File"
+
+    # Properties for directory and file path selection
     directory: bpy.props.StringProperty(subtype="DIR_PATH")
+    file: bpy.props.StringProperty(subtype="FILE_PATH")  # Added for file selection
     directory_key: bpy.props.StringProperty()
 
     def execute(self, context):
+        # Handle the selection based on the directory_key
         if self.directory_key == "object_quality":
             context.scene.object_quality_directory = self.directory
         elif self.directory_key == "bin_quality":
             context.scene.bin_quality_directory = self.directory
-        elif self.directory_key == "output_directory":  # Handle output directory
+        elif self.directory_key == "output_directory":
             context.scene.output_directory = self.directory
+        elif self.directory_key == "materials_directory":  # Handle materials file
+            context.Scene.materials_directory = self.file
 
         return {'FINISHED'}
-    
+
     def invoke(self, context, event):
-        context.window_manager.fileselect_add(self)
+        # Check if it's a file or directory selection based on the directory_key
+        if self.directory_key == "materials_directory":
+            context.window_manager.fileselect_add(self)  # For file selection (e.g., JSON)
+        else:
+            context.window_manager.fileselect_add(self)  # For directory selection
+
         return {'RUNNING_MODAL'}
 
     
@@ -434,36 +452,69 @@ def fill_dataframe_from_directory(directory_path):
     
     return df
 
-def append_material_from_library(asset_library_path, material_name):
-    # The path to your asset library blend file
-    library_path = bpy.path.abspath(asset_library_path)
+def create_or_update_material_from_json(material_info):
+    material_name = material_info['name']
     
-    # The name of the material to append
-    material_name = material_name
-    
-    # Load the asset library
-    with bpy.data.libraries.load(library_path) as (data_from, data_to):
-        if material_name in data_from.materials:
-            data_to.materials = [material_name]
-        else:
-            raise ValueError(f"Material '{material_name}' not found in the asset library.")
+    # Check if the material exists in the Blender file
+    if material_name in bpy.data.materials:
+        material = bpy.data.materials[material_name]
+    else:
+        # Create a new material if not found
+        material = bpy.data.materials.new(name=material_name)
 
-    # The appended material is now available in bpy.data.materials
-    return bpy.data.materials.get(material_name)
+    # Ensure the material uses nodes
+    material.use_nodes = True
+    nodes = material.node_tree.nodes
 
-materials = bpy.data.materials
-for material in materials:
-    bpy.data.materials.remove(material)
+    # Find or create the Principled BSDF node
+    bsdf = None
+    for node in nodes:
+        if node.type == 'BSDF_PRINCIPLED':
+            bsdf = node
+            break
+    if not bsdf:
+        bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
 
-asset_library_path = "C:/Users/andre/Documents/Blender Materials/sample_materials.blend"
-material_names=["1970_tiles", "Ceramic", "Crushed Velvet Eevee", "Polished Walnut", "WoodP", "wood", "wood boards"]
-for mat in material_names:
-    material = append_material_from_library(asset_library_path, mat)
+    # Update Base Color
+    if 'base_color' in material_info:
+        bsdf.inputs['Base Color'].default_value = material_info['base_color'] + [1.0]  # Adding alpha channel
+
+    # Update Roughness
+    if 'roughness' in material_info:
+        bsdf.inputs['Roughness'].default_value = material_info['roughness']
+
+    # Update Metallic
+    if 'metallic' in material_info:
+        bsdf.inputs['Metallic'].default_value = material_info['metallic']
+
+    # Optional additional properties from your JSON file
+    # Add more properties if needed based on the JSON structure
+
+    print(f"Material '{material_name}' has been created/updated.")
 
 
 
 
 def generate_scene(objects, bins, context, scene):
+    # Remove existing materials
+    materials = bpy.data.materials
+    for material in materials:
+        bpy.data.materials.remove(material)
+
+    # Load material data from the JSON file
+    json_file_path = bpy.context.scene.materials_directory  # Replace with your JSON file path
+
+    with open(json_file_path, 'r') as json_file:
+        material_data = json.load(json_file)
+
+    # Create or update materials based on JSON data
+    for mat_info in material_data:
+        create_or_update_material_from_json(mat_info)
+    
+    
+    
+    
+    
     #Set simulation to 1 frame
     bpy.context.scene.frame_set(1)
     material_names=["1970_tiles", "Ceramic", "Crushed Velvet Eevee", "Polished Walnut", "WoodP", "wood", "wood boards"]
@@ -496,16 +547,40 @@ def generate_scene(objects, bins, context, scene):
     imported_object.pass_index = object_counter
 
 
-    random_mat = random.choice(material_names)
-    material = bpy.data.materials.get(random_mat)
-    if material:
-        # Check if there are any materials on the imported object
-        if len(imported_object.data.materials) == 0:
-            # If no materials, append the new material
-            imported_object.data.materials.append(material)
+    def assign_random_material(imported_object, material_data):
+        # Choose a random material from the list of material data (JSON)
+        random_mat_info = random.choice(material_data)
+        material_name = random_mat_info['name']
+        
+        # Retrieve the material from Blender's materials data
+        material = bpy.data.materials.get(material_name)
+        
+        if material:
+            # Check if there are any materials on the imported object
+            if len(imported_object.data.materials) == 0:
+                # If no materials, append the new material
+                imported_object.data.materials.append(material)
+            else:
+                # If materials exist, replace the first material slot
+                imported_object.data.materials[0] = material
+            print(f"Assigned material '{material_name}' to object '{imported_object.name}'")
         else:
-            # If materials exist, replace the first material slot
-            imported_object.data.materials[0] = material
+            print(f"Material '{material_name}' not found in Blender's data.")
+
+    # Example Usage:
+    # Assuming 'imported_object' is the object you want to assign a material to
+    # and 'material_data' is the loaded data from the JSON file
+
+    json_file_path = bpy.context.scene.materials_directory
+
+    with open(json_file_path, 'r') as json_file:
+        material_data = json.load(json_file)
+
+    # Assuming 'imported_object' is your object
+    imported_object = bpy.context.active_object  # Use the currently selected object, or replace with the target object
+
+    # Assign a random material from JSON data to the imported object
+    assign_random_material(imported_object, material_data)
                 
     
     random_scale_factor = random.uniform(context.scene.min_bin_scaling, context.scene.max_bin_scaling)
@@ -711,56 +786,6 @@ def generate_scene(objects, bins, context, scene):
     
     if bpy.context.scene.matrix and bpy.context.scene.stereo:
         create_laser_grid("Laser", (x_camera, y_camera, z_camera), bpy.context.scene.ir_side, math.radians(bpy.context.scene.ir_separation), rot_quat.to_euler())
-    
-    #Export FBX
-    main_output_dir = bpy.context.scene.output_directory
-
-    # Paths for the 'objects' and 'bin' folders
-    objects_dir = os.path.join(main_output_dir, "objects")
-    bin_dir = os.path.join(main_output_dir, "bin")
-
-    # Ensure both directories exist
-    if not os.path.exists(objects_dir):
-        os.makedirs(objects_dir)
-    if not os.path.exists(bin_dir):
-        os.makedirs(bin_dir)
-
-    # Loop through all objects in the scene
-    for obj in bpy.context.scene.objects:
-        if obj.type == 'MESH' and obj.name != "Plane":  # Export only mesh objects, excluding "Plane"
-            # Select the object
-            bpy.ops.object.select_all(action='DESELECT')  # Deselect all objects
-            obj.select_set(True)  # Select the current object
-
-            # Set the object as the active object
-            bpy.context.view_layer.objects.active = obj
-
-            # Determine the appropriate directory
-            if obj.name.lower() == "bin":
-                export_dir = bin_dir
-            else:
-                export_dir = objects_dir
-
-            # Construct the full file path
-            file_path = os.path.join(export_dir, obj.name + ".fbx")
-
-            # Export the selected object to an FBX file
-            bpy.ops.export_scene.fbx(
-                filepath=file_path,
-                use_selection=True,
-                apply_unit_scale=True,
-                global_scale=1.0,
-                use_space_transform=True
-            )
-
-            print(f"Exported {obj.name} to {file_path}")
-
-    # Deselect all objects at the end
-    bpy.ops.object.select_all(action='DESELECT')
-    
-    
-    
-    
     
     #Generate Render
     scene_renderer = SceneRenderer(context, context.scene.output_directory,scene,i+1)
@@ -1179,61 +1204,54 @@ class Generate_GQ:
         array_no_nans = np.nan_to_num(gq, nan=0)
         np.savetxt(os.path.join(gq_path, new_name), array_no_nans, delimiter=',', fmt='%f')
         
-        
-        base_output_dir = bpy.context.scene.output_directory
+        if bpy.context.scene.positions:
+            base_output_dir = bpy.context.scene.output_directory
 
-        # Create a subfolder called 'positions' within the base output directory
-        positions_dir = os.path.join(base_output_dir, "positions")
+            specific_positions_dir = os.path.join(base_output_dir, "positions", str(scene))
+            os.makedirs(specific_positions_dir, exist_ok=True)
 
-        # Ensure the 'positions' directory exists
-        if not os.path.exists(positions_dir):
-            os.makedirs(positions_dir)
+            # Export x, y, z, gq, vx, vy, vz to CSV files in the 'positions' directory
+            array_no_nans = np.nan_to_num(points_3d_world[:,:,0], nan=0)
+            np.savetxt(os.path.join(specific_positions_dir, "x.csv"), array_no_nans, delimiter=',', fmt='%f')
 
-        # Export x, y, z, gq, vx, vy, vz to CSV files in the 'positions' directory
-        array_no_nans = np.nan_to_num(points_3d_world[:,:,0], nan=0)
-        np.savetxt(os.path.join(positions_dir, "x.csv"), array_no_nans, delimiter=',', fmt='%f')
+            array_no_nans = np.nan_to_num(points_3d_world[:,:,1], nan=0)
+            np.savetxt(os.path.join(specific_positions_dir, "y.csv"), array_no_nans, delimiter=',', fmt='%f')
 
-        array_no_nans = np.nan_to_num(points_3d_world[:,:,1], nan=0)
-        np.savetxt(os.path.join(positions_dir, "y.csv"), array_no_nans, delimiter=',', fmt='%f')
+            array_no_nans = np.nan_to_num(points_3d_world[:,:,2], nan=0)
+            np.savetxt(os.path.join(specific_positions_dir, "z.csv"), array_no_nans, delimiter=',', fmt='%f')
 
-        array_no_nans = np.nan_to_num(points_3d_world[:,:,2], nan=0)
-        np.savetxt(os.path.join(positions_dir, "z.csv"), array_no_nans, delimiter=',', fmt='%f')
+            array_no_nans = np.nan_to_num(vector_array[:,:, 0], nan=0)
+            np.savetxt(os.path.join(specific_positions_dir, "Vx.csv"), array_no_nans, delimiter=',', fmt='%f')
 
-        array_no_nans = np.nan_to_num(vector_array[:,:, 0], nan=0)
-        np.savetxt(os.path.join(positions_dir, "Vx.csv"), array_no_nans, delimiter=',', fmt='%f')
+            array_no_nans = np.nan_to_num(vector_array[:,:, 1], nan=0)
+            np.savetxt(os.path.join(specific_positions_dir, "Vy.csv"), array_no_nans, delimiter=',', fmt='%f')
 
-        array_no_nans = np.nan_to_num(vector_array[:,:, 1], nan=0)
-        np.savetxt(os.path.join(positions_dir, "Vy.csv"), array_no_nans, delimiter=',', fmt='%f')
-
-        array_no_nans = np.nan_to_num(vector_array[:,:, 2], nan=0)
-        np.savetxt(os.path.join(positions_dir, "Vz.csv"), array_no_nans, delimiter=',', fmt='%f')
+            array_no_nans = np.nan_to_num(vector_array[:,:, 2], nan=0)
+            np.savetxt(os.path.join(specific_positions_dir, "Vz.csv"), array_no_nans, delimiter=',', fmt='%f')
+            
         
-        
-        # Create a subfolder called 'positions' within the base output directory
-        elements_dir = os.path.join(base_output_dir, "elements")
-
-        # Ensure the 'positions' directory exists
-        if not os.path.exists(elements_dir):
-            os.makedirs(elements_dir)
-        
-        array_no_nans = np.nan_to_num(distance, nan=0)
-        np.savetxt(os.path.join(elements_dir, "distance.csv"), array_no_nans, delimiter=',', fmt='%f')
-        
-        array_no_nans = np.nan_to_num(height, nan=0)
-        np.savetxt(os.path.join(elements_dir, "height.csv"), array_no_nans, delimiter=',', fmt='%f')
-        
-        array_no_nans = np.nan_to_num(flatness, nan=0)
-        np.savetxt(os.path.join(elements_dir, "flatness.csv"), array_no_nans, delimiter=',', fmt='%f')
-        
-        array_no_nans = np.nan_to_num(smoothness, nan=0)
-        np.savetxt(os.path.join(elements_dir, "smoothness.csv"), array_no_nans, delimiter=',', fmt='%f')
-        
-        array_no_nans = np.nan_to_num(impacts, nan=0)
-        np.savetxt(os.path.join(elements_dir, "impacts.csv"), array_no_nans, delimiter=',', fmt='%f')
-        
-        array_no_nans = np.nan_to_num(edge, nan=0)
-        np.savetxt(os.path.join(elements_dir, "edge.csv"), array_no_nans, delimiter=',', fmt='%f')
-        
+        if bpy.context.scene.gq and bpy.context.scene.gq_elements:
+            specific_elements_dir = os.path.join(base_output_dir, "elements", str(scene))
+            os.makedirs(specific_elements_dir, exist_ok=True)
+            
+            array_no_nans = np.nan_to_num(distance, nan=0)
+            np.savetxt(os.path.join(specific_elements_dir, "distance.csv"), array_no_nans, delimiter=',', fmt='%f')
+            
+            array_no_nans = np.nan_to_num(height, nan=0)
+            np.savetxt(os.path.join(specific_elements_dir, "height.csv"), array_no_nans, delimiter=',', fmt='%f')
+            
+            array_no_nans = np.nan_to_num(flatness, nan=0)
+            np.savetxt(os.path.join(specific_elements_dir, "flatness.csv"), array_no_nans, delimiter=',', fmt='%f')
+            
+            array_no_nans = np.nan_to_num(smoothness, nan=0)
+            np.savetxt(os.path.join(specific_elements_dir, "smoothness.csv"), array_no_nans, delimiter=',', fmt='%f')
+            
+            array_no_nans = np.nan_to_num(impacts, nan=0)
+            np.savetxt(os.path.join(specific_elements_dir, "impacts.csv"), array_no_nans, delimiter=',', fmt='%f')
+            
+            array_no_nans = np.nan_to_num(edge, nan=0)
+            np.savetxt(os.path.join(specific_elements_dir, "edge.csv"), array_no_nans, delimiter=',', fmt='%f')
+            
 
                                 
                 
@@ -1558,7 +1576,7 @@ class Generate_GQ:
         # Define a function to calculate the angle between two normals
         def calculate_angle(normal_a, normal_b):
             """Calculate the angle between two normals."""
-            cos_angle = np.dot(normal_a, normal_b) / (norm(normal_a) * norm(normal_b))
+            cos_angle = np.dot(normal_a, normal_b) / (np.linalg.norm(normal_a) * np.linalg.norm(normal_b))
             cos_angle = np.clip(cos_angle, -1.0, 1.0)  # Clamp to handle numerical instability
             return degrees(acos(cos_angle))
 
@@ -1753,7 +1771,23 @@ class GenerateDataset(bpy.types.Operator):
         starting_scene = bpy.context.scene.starting_scene
         for scene in range(starting_scene, starting_scene + dataset_size):
             start_time = datetime.now()
-            generate_scene(objects_df, bins_df, context, scene) 
+            attempt = 0
+            retries = 10
+            while attempt < retries:
+                try:
+                    # Attempt to generate the scene
+                    generate_scene(objects_df, bins_df, context, scene)
+                    # If successful, break out of the loop
+                    break
+                except Exception as e:
+                    attempt += 1
+                    print(f"Error generating scene {scene}: {str(e)}")
+                    if attempt >= retries:
+                        # If we reach the maximum number of retries, raise the error
+                        print(f"Failed after {retries} attempts to generate scene {scene}")
+                        raise e
+                    else:
+                        print(f"Retrying... attempt {attempt + 1}")
             end_time = datetime.now()
             time_difference = end_time - start_time
             print(f"Generar la escena {scene} tomo {time_difference}")
@@ -1795,6 +1829,13 @@ def register():
     bpy.utils.register_class(GQ_PT_Panel)
     bpy.utils.register_class(SEGMENTATION_PT_Panel)
     
+    
+    bpy.types.Scene.materials_directory = bpy.props.StringProperty(
+        name="Object Quality Directory",
+        subtype='FILE_PATH',
+        description="Path to the directory containing object quality files",
+        default="C:/Users/andre/Documents/Blender Materials/materials_data_extended.json"
+    )
 
     
     bpy.utils.register_class(FolderFinder)
@@ -1802,17 +1843,31 @@ def register():
         name="Object Quality Directory",
         subtype='DIR_PATH',
         description="Path to the directory containing object quality files",
-        default="C:/Users/andre/Documents/Recursos Tesis/Objetos_reducido/KIT/"
+        default="C:/Users/andre/Documents/Recursos Tesis/Objetos_reducido/"
     )
     
     bpy.types.Scene.output_directory = bpy.props.StringProperty(
         name="Output Directory",
         subtype='DIR_PATH',
         description="Path to the directory where output files will be saved",
-        default="C:/Users/andre/Documents/Isaac Scene Scenarios/1/"
+        default="C:/Users/andre/Documents/Base de datos 15000/"
     )
     
+    
+
+    
     #Properties
+    bpy.types.Scene.gq_elements = bpy.props.BoolProperty(
+        name="gq elements",
+        description="Minimum amount of objects per scene",
+        default=True
+    )
+    
+    bpy.types.Scene.positions = bpy.props.BoolProperty(
+        name="gq elements",
+        description="Minimum amount of objects per scene",
+        default=True
+    )
     
     bpy.types.Scene.min_objects = bpy.props.IntProperty(
         name="Min Objects",
@@ -1826,7 +1881,7 @@ def register():
     bpy.types.Scene.max_objects = bpy.props.IntProperty(
         name="Max Objects",
         description="Maximum amount of objects per scene",
-        default=10,
+        default=15,
         min=1,
         max=70,
         update=update_max_objects
@@ -1860,7 +1915,7 @@ def register():
     bpy.types.Scene.min_scaling = bpy.props.FloatProperty(
         name="Min Scaling",
         description="Minimum amount of scaling",
-        default=1.0,
+        default=0.5,
         min=0.5,
         max=2.0,
         update=update_min_scaling
@@ -1895,7 +1950,7 @@ def register():
     bpy.types.Scene.max_camera_angle = bpy.props.IntProperty(
         name="Max Camera Angle",
         description="Maximum camera angle",
-        default=0,
+        default=45,
         min=0,
         max=80,
     )
@@ -1912,7 +1967,7 @@ def register():
     bpy.types.Scene.max_camera = bpy.props.FloatProperty(
         name="Max Camera height",
         description="Maximum camera height",
-        default=1,
+        default=2,
         min=0.3,
         max=5.0,
         update=update_max_camera  
@@ -1969,7 +2024,7 @@ def register():
     bpy.types.Scene.dataset_size = bpy.props.IntProperty(
         name="Dataset size",
         description="Dataset_size",
-        default=1,
+        default=500,
         min=1,
         max=20000,
     )
@@ -2056,7 +2111,7 @@ def register():
     bpy.types.Scene.weight_height = bpy.props.FloatProperty(
         name="Weight for the height",
         description="Weight for the height",
-        default=0.8,
+        default=0.0,
         min=0.0,
         max=50.0, 
     )
@@ -2064,7 +2119,7 @@ def register():
     bpy.types.Scene.weight_flatness = bpy.props.FloatProperty(
         name="Weight for the flatness",
         description="Weight for the flatness",
-        default=0.8,
+        default=1.0,
         min=0.0,
         max=50.0,
     )
@@ -2072,7 +2127,7 @@ def register():
     bpy.types.Scene.weight_distance = bpy.props.FloatProperty(
         name="Weight for the distance to center of mass",
         description="Weight for the distance to center of mass",
-        default=0.8,
+        default=0.5,
         min=0.0,
         max=50.0, 
     )
@@ -2080,7 +2135,7 @@ def register():
     bpy.types.Scene.weight_smoothness = bpy.props.FloatProperty(
         name="Weight for smoothness",
         description="Weight for smoothness",
-        default=0.8,
+        default=1.0,
         min=0.0,
         max=50.0, 
     )
@@ -2088,7 +2143,7 @@ def register():
     bpy.types.Scene.weight_impacts = bpy.props.FloatProperty(
         name="Weight for imapct",
         description="Weight for impacts",
-        default=0.8,
+        default=0.0,
         min=0.0,
         max=50.0, 
     )
@@ -2096,7 +2151,7 @@ def register():
     bpy.types.Scene.weight_edge = bpy.props.FloatProperty(
         name="Weight for edge",
         description="Weight for edge",
-        default=0.8,
+        default=0.5,
         min=0.0,
         max=50.0, 
     )
@@ -2197,7 +2252,7 @@ def register():
     bpy.types.Scene.stereo = bpy.props.BoolProperty(
         name="Stereo",
         description="Stereo",
-        default=False,
+        default=True,
     )
     
     bpy.types.Scene.matrix = bpy.props.BoolProperty(
@@ -2209,15 +2264,14 @@ def register():
     bpy.types.Scene.starting_scene = bpy.props.IntProperty(
         name="Starting Scene",
         description="Starting scene number",
-        default=1,
+        default=2,
         min=1,
-        max=5000, 
+        max=15000, 
     )
     
     
     
     bpy.utils.register_class(GenerateDataset)
-    
     
     
     
@@ -2228,14 +2282,15 @@ def unregister():
     bpy.utils.unregister_class(MODEL_PT_Panel)
     bpy.utils.unregister_class(PARAMETERS_PT_Panel)
     bpy.utils.unregister_class(OUTPUT_PT_Panel)
+    bpy.utils.unregister_class(STEREO_PT_Panel)  # This was missing
     bpy.utils.unregister_class(GQ_PT_Panel)
     bpy.utils.unregister_class(SEGMENTATION_PT_Panel)
     bpy.utils.unregister_class(FolderFinder)
     bpy.utils.unregister_class(GenerateDataset)
-
+    
     # Remove custom properties added to bpy.types.Scene
     props = [
-        "object_quality_directory", "output_directory", "min_objects", "max_objects",
+        "gq_elements","positions","object_quality_directory", "output_directory","materials_directory", "min_objects", "max_objects",
         "min_bin_scaling", "max_bin_scaling", "scaling", "min_scaling", "max_scaling",
         "max_lights", "max_light_strength", "max_camera_angle", "min_camera",
         "max_camera", "renders_scene", "rgb", "depth", "normals", "segmentation",
@@ -2244,11 +2299,16 @@ def unregister():
         "gq_flatness", "gq_smoothness", "gq_impacts", "gq_edge", "impacts_mask",
         "impacts_weight_bool", "edge_mask", "edge_weight_bool", "weight_height",
         "weight_flatness", "weight_distance", "weight_smoothness", "weight_impacts",
-        "weight_edge", "cup_diameter", "flat_log", "smooth_log", "edge_angle"
+        "weight_edge", "cup_diameter", "flat_log", "smooth_log", "edge_angle",
+        "res_x", "res_y", "focal_length", "sensor_width", "sensor_height",
+        "camera_baseline", "ir_side", "ir_separation", "stereo", "matrix",
+        "starting_scene"
     ]
+    
     for prop in props:
         if hasattr(bpy.types.Scene, prop):
             delattr(bpy.types.Scene, prop)
+
 
 
 

@@ -1,4 +1,4 @@
-#Grasp Quality Dataset Generator for Bin Picking
+# Grasp Quality Dataset Generator for Bin Picking
 
 ## Overview
 
@@ -7,3 +7,5 @@ This project is a Python-based tool integrated with Blender that generates synth
 The dataset includes RGB images, depth maps, normal vectors, and segmentation masks, with an additional Grasp Quality map that measures the suitability of each pixel for grasping.
 
 This tool is primarily aimed at researchers or engineers working on robotic grasping tasks and machine learning models for bin-picking.
+
+## Usage
